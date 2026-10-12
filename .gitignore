@@ -1,0 +1,8 @@
+*.exe 
+ReleaseBuild/ 
+dist/ 
+publish-framework-dependent/ 
+bin/ 
+obj/ 
+node_modules/ 
+client/dist/ 
