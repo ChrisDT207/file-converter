@@ -1,7 +1,10 @@
 using System.IO;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Media;
 using FileConverter.Core.Interfaces;
 using FileConverter.Desktop.Bridge;
 using Microsoft.Web.WebView2.Core;
@@ -13,19 +16,116 @@ public partial class MainWindow : Window
     private readonly IpcBridge _ipcBridge;
     private readonly IFileSystemService _fileSystemService;
 
+    [DllImport("dwmapi.dll", PreserveSig = true)]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+    private const int DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 = 19;
+    private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+    private const int DWMWA_CAPTION_COLOR = 35;
+    private const int DWMWA_TEXT_COLOR = 36;
+
+    private const uint SWP_NOMOVE = 0x0002;
+    private const uint SWP_NOSIZE = 0x0001;
+    private const uint SWP_NOZORDER = 0x0004;
+    private const uint SWP_FRAMECHANGED = 0x0020;
+
     public MainWindow(IpcBridge ipcBridge, IFileSystemService fileSystemService)
     {
         InitializeComponent();
         _ipcBridge = ipcBridge;
         _fileSystemService = fileSystemService;
 
+        _ipcBridge.ThemeChanged += OnThemeChanged;
+        SourceInitialized += MainWindow_SourceInitialized;
         Loaded += MainWindow_Loaded;
+    }
+
+    private void MainWindow_SourceInitialized(object? sender, EventArgs e)
+    {
+        // Default immediately to dark theme on startup so the window opens with dark titlebar & controls
+        ApplyTheme(true);
+    }
+
+    private void OnThemeChanged(bool isDark)
+    {
+        ApplyTheme(isDark);
+    }
+
+    public void ApplyTheme(bool isDark)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.Invoke(() => ApplyTheme(isDark));
+            return;
+        }
+
+        try
+        {
+            var hwnd = new WindowInteropHelper(this).Handle;
+            if (hwnd != IntPtr.Zero)
+            {
+                int useDarkMode = isDark ? 1 : 0;
+
+                // Modern Windows 10 (20H1+) and Windows 11 immersive dark mode
+                int hr = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useDarkMode, sizeof(int));
+                if (hr != 0)
+                {
+                    // Fallback for older Windows 10 builds (1809 - 1909)
+                    DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1, ref useDarkMode, sizeof(int));
+                }
+
+                // Windows 11 (build 22000+) custom caption and text colors
+                if (Environment.OSVersion.Version.Build >= 22000)
+                {
+                    // COLORREF format is 0x00BBGGRR
+                    // Dark: #0B1120 -> R=0x0B, G=0x11, B=0x20 => 0x0020110B
+                    // Light: #F8FAFC -> R=0xF8, G=0xFA, B=0xFC => 0x00FCFAF8
+                    int captionColor = isDark ? 0x0020110B : 0x00FCFAF8;
+                    DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, ref captionColor, sizeof(int));
+
+                    // Text color: White for dark mode, dark slate (#0F172A) for light mode
+                    int textColor = isDark ? 0x00FFFFFF : 0x002A170F;
+                    DwmSetWindowAttribute(hwnd, DWMWA_TEXT_COLOR, ref textColor, sizeof(int));
+                }
+
+                // Force Windows non-client area (title bar and min/max/close buttons) to redraw immediately
+                SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+            }
+
+            // Match WPF window background and WebView2 default background color
+            var bgHex = isDark ? "#0B1120" : "#F8FAFC";
+            Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(bgHex));
+
+            try
+            {
+                if (MainWebView != null)
+                {
+                    MainWebView.DefaultBackgroundColor = isDark
+                        ? System.Drawing.Color.FromArgb(255, 11, 17, 32)
+                        : System.Drawing.Color.FromArgb(255, 248, 250, 252);
+                }
+            }
+            catch
+            {
+                // WebView2 COM wrapper may not be ready during early SourceInitialized
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to set window theme: {ex.Message}");
+        }
     }
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         try
         {
+            // Set dark background on WebView2 prior to navigation to eliminate white flash
+            MainWebView.DefaultBackgroundColor = System.Drawing.Color.FromArgb(255, 11, 17, 32);
+
             // Initialize CoreWebView2 Environment
             var userDataFolder = Path.Combine(Path.GetTempPath(), "FileConverter_WebView2_UserData");
             var env = await CoreWebView2Environment.CreateAsync(userDataFolder: userDataFolder);

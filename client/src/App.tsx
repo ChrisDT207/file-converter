@@ -11,7 +11,8 @@ import { MixedBatchModal } from './components/MixedBatchModal';
 
 export const App: React.FC = () => {
   const [darkMode, setDarkMode] = useState<boolean>(() => {
-    return localStorage.getItem('file_converter_dark_mode') === 'true';
+    const saved = localStorage.getItem('file_converter_dark_mode');
+    return saved !== null ? saved === 'true' : true; // Default to dark theme!
   });
 
   const [outputDirectory, setOutputDirectory] = useState<string>('');
@@ -24,7 +25,7 @@ export const App: React.FC = () => {
   const [isSplitModalOpen, setIsSplitModalOpen] = useState<boolean>(false);
   const [isMixedModalOpen, setIsMixedModalOpen] = useState<boolean>(false);
 
-  // Apply dark mode class to root html element
+  // Apply dark mode class to root html element and synchronize with Windows native window title bar
   useEffect(() => {
     if (darkMode) {
       document.documentElement.classList.add('dark');
@@ -33,6 +34,9 @@ export const App: React.FC = () => {
       document.documentElement.classList.remove('dark');
       localStorage.setItem('file_converter_dark_mode', 'false');
     }
+
+    // Synchronize theme with native Windows title bar and window min/max/close controls
+    nativeBridge.setTheme(darkMode ? 'dark' : 'light').catch(() => {});
   }, [darkMode]);
 
   // Load initial backend configuration and full conversion matrix

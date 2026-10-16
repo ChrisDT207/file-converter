@@ -20,6 +20,17 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        AppDomain.CurrentDomain.UnhandledException += (s, args) =>
+        {
+            MessageBox.Show($"Unhandled Error: {args.ExceptionObject}", "FileConverter Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        };
+
+        DispatcherUnhandledException += (s, args) =>
+        {
+            MessageBox.Show($"Application Error: {args.Exception.Message}\n{args.Exception.StackTrace}", "FileConverter Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            args.Handled = true;
+        };
+
         var services = new ServiceCollection();
         ConfigureServices(services);
         _serviceProvider = services.BuildServiceProvider();

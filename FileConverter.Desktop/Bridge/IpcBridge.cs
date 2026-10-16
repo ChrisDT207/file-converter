@@ -16,6 +16,8 @@ public class IpcBridge
     private readonly JsonSerializerOptions _jsonOptions;
     private WebView2? _webView;
 
+    public event Action<bool>? ThemeChanged;
+
     public IpcBridge(
         IConversionOrchestrator orchestrator,
         IFileSystemService fileSystemService,
@@ -240,6 +242,25 @@ public class IpcBridge
                     }
                 }
                 return false;
+            }
+
+            case "settheme":
+            {
+                string theme = "dark";
+                if (payload.HasValue)
+                {
+                    if (payload.Value.ValueKind == JsonValueKind.String)
+                    {
+                        theme = payload.Value.GetString() ?? "dark";
+                    }
+                    else if (payload.Value.TryGetProperty("theme", out var prop))
+                    {
+                        theme = prop.GetString() ?? "dark";
+                    }
+                }
+                bool isDark = theme.Equals("dark", StringComparison.OrdinalIgnoreCase);
+                ThemeChanged?.Invoke(isDark);
+                return true;
             }
 
             default:

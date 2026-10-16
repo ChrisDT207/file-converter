@@ -138,6 +138,10 @@ class NativeBridgeService {
     return this.sendRequest<boolean>('openFile', { path });
   }
 
+  public async setTheme(theme: 'dark' | 'light'): Promise<boolean> {
+    return this.sendRequest<boolean>('setTheme', { theme });
+  }
+
   private simulateBrowserFallback(action: string, payload: any, resolve: (val: any) => void) {
     console.info(`[NativeBridge:BrowserFallback] Simulating action: ${action}`, payload);
     setTimeout(() => {
