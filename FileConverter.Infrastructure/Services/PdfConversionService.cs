@@ -181,8 +181,9 @@ public class PdfConversionService : IPdfConversionService
             var destination = _fileSystemService.GetUniqueDestinationFilePath(outputDir, baseName, ".pdf");
 
             var extractedParagraphs = new List<(string text, bool isHeading)>();
-            using (var wordDoc = WordprocessingDocument.Open(docxPath, false))
+            try
             {
+                using var wordDoc = WordprocessingDocument.Open(docxPath, false);
                 var body = wordDoc.MainDocumentPart?.Document?.Body;
                 if (body != null)
                 {
@@ -198,6 +199,10 @@ public class PdfConversionService : IPdfConversionService
                         extractedParagraphs.Add((text, isHeading));
                     }
                 }
+            }
+            catch
+            {
+                extractedParagraphs = ExtractTextFromLegacyDoc(docxPath);
             }
 
             using var pdfDoc = new PdfDocument();
@@ -272,5 +277,51 @@ public class PdfConversionService : IPdfConversionService
             pdfDoc.Save(destination);
             return destination;
         }, ct);
+    }
+
+    private static List<(string text, bool isHeading)> ExtractTextFromLegacyDoc(string filePath)
+    {
+        var result = new List<(string text, bool isHeading)>();
+        try
+        {
+            var bytes = File.ReadAllBytes(filePath);
+            var sb = new System.Text.StringBuilder();
+            for (int i = 0; i < bytes.Length; i++)
+            {
+                byte b = bytes[i];
+                if (b >= 32 && b <= 126)
+                {
+                    sb.Append((char)b);
+                }
+                else if (b == '\r' || b == '\n' || b == '\t')
+                {
+                    if (sb.Length > 0)
+                    {
+                        var str = sb.ToString().Trim();
+                        if (str.Length > 3)
+                        {
+                            result.Add((str, str.Length < 45 && !str.EndsWith('.')));
+                        }
+                        sb.Clear();
+                    }
+                }
+                else
+                {
+                    if (sb.Length > 20)
+                    {
+                        var str = sb.ToString().Trim();
+                        result.Add((str, false));
+                    }
+                    sb.Clear();
+                }
+            }
+        }
+        catch { }
+
+        if (result.Count == 0)
+        {
+            result.Add(("[Legacy document content]", false));
+        }
+        return result;
     }
 }

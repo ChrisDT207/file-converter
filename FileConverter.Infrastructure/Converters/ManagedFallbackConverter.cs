@@ -8,17 +8,20 @@ public class ManagedFallbackConverter : IFileConverter
     private readonly IDocumentConversionService _documentService;
     private readonly IDataConversionService _dataService;
     private readonly IImageConversionService _imageService;
+    private readonly IPresentationConversionService _presentationService;
     private readonly ILogger<ManagedFallbackConverter> _logger;
 
     public ManagedFallbackConverter(
         IDocumentConversionService documentService,
         IDataConversionService dataService,
         IImageConversionService imageService,
+        IPresentationConversionService presentationService,
         ILogger<ManagedFallbackConverter> logger)
     {
         _documentService = documentService;
         _dataService = dataService;
         _imageService = imageService;
+        _presentationService = presentationService;
         _logger = logger;
     }
 
@@ -34,23 +37,30 @@ public class ManagedFallbackConverter : IFileConverter
 
         if (src == tgt) return false;
 
-        // Data / Spreadsheets
-        if (src is "csv" or "tsv" or "json" or "xml" or "yaml" or "yml" or "xlsx" &&
-            tgt is "csv" or "json" or "xml" or "yaml" or "html" or "txt")
+        // Presentations (PPTX, PPT -> PDF, TXT, MD, HTML, PNG, JPG)
+        if (src is "pptx" or "ppt" &&
+            tgt is "pdf" or "txt" or "md" or "html" or "png" or "jpg" or "jpeg")
         {
             return true;
         }
 
-        // Documents
-        if (src is "pdf" or "docx" or "doc" or "md" or "txt" or "html" &&
-            tgt is "pdf" or "docx" or "txt" or "md" or "html" or "png" or "jpg")
+        // Data / Spreadsheets (CSV, TSV, JSON, XML, YAML, XLSX, XLS -> CSV, TSV, JSON, XML, YAML, HTML, TXT, XLSX, PDF)
+        if (src is "csv" or "tsv" or "json" or "xml" or "yaml" or "yml" or "xlsx" or "xls" &&
+            tgt is "csv" or "tsv" or "json" or "xml" or "yaml" or "yml" or "html" or "txt" or "xlsx" or "pdf")
         {
             return true;
         }
 
-        // Images
-        if (src is "png" or "jpg" or "jpeg" or "bmp" or "gif" or "ico" or "tiff" &&
-            tgt is "png" or "jpg" or "jpeg" or "bmp" or "gif" or "ico" or "tiff" or "pdf")
+        // Documents (PDF, DOCX, DOC, MD, TXT, LOG, HTML, HTM -> PDF, DOCX, TXT, MD, HTML, PNG, JPG, BMP, RTF)
+        if (src is "pdf" or "docx" or "doc" or "md" or "txt" or "log" or "html" or "htm" &&
+            tgt is "pdf" or "docx" or "txt" or "md" or "html" or "png" or "jpg" or "jpeg" or "bmp" or "rtf")
+        {
+            return true;
+        }
+
+        // Images (PNG, JPG, JPEG, BMP, GIF, ICO, TIFF, TIF, WEBP -> PNG, JPG, JPEG, BMP, GIF, ICO, TIFF, TIF, WEBP, PDF)
+        if (src is "png" or "jpg" or "jpeg" or "bmp" or "gif" or "ico" or "tiff" or "tif" or "webp" &&
+            tgt is "png" or "jpg" or "jpeg" or "bmp" or "gif" or "ico" or "tiff" or "tif" or "webp" or "pdf")
         {
             return true;
         }
@@ -70,14 +80,21 @@ public class ManagedFallbackConverter : IFileConverter
 
         progress?.Report(20);
 
-        if (srcExt is "csv" or "tsv" or "json" or "xml" or "yaml" or "yml" or "xlsx")
+        if (srcExt is "pptx" or "ppt")
+        {
+            var res = await _presentationService.ConvertPresentationAsync(sourcePath, tgtExt, outputDir, ct);
+            progress?.Report(100);
+            return res;
+        }
+
+        if (srcExt is "csv" or "tsv" or "json" or "xml" or "yaml" or "yml" or "xlsx" or "xls")
         {
             var res = await _dataService.ConvertDataAsync(sourcePath, tgtExt, outputDir, ct);
             progress?.Report(100);
             return res;
         }
 
-        if (srcExt is "png" or "jpg" or "jpeg" or "bmp" or "gif" or "ico" or "tiff")
+        if (srcExt is "png" or "jpg" or "jpeg" or "bmp" or "gif" or "ico" or "tiff" or "tif" or "webp")
         {
             var res = await _imageService.ConvertImageAsync(sourcePath, tgtExt, outputDir, ct);
             progress?.Report(100);

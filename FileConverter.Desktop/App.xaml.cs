@@ -48,8 +48,12 @@ public partial class App : Application
         services.AddTransient<IImageConversionService, ImageConversionService>();
         services.AddTransient<IDataConversionService, DataConversionService>();
         services.AddTransient<IDocumentConversionService, DocumentConversionService>();
+        services.AddTransient<IPresentationConversionService, PresentationConversionService>();
 
         // Extensible IFileConverter Engine Adapters
+        services.AddTransient<IFileConverter, PowerPointConverter>();
+        services.AddTransient<IFileConverter, WordConverter>();
+        services.AddTransient<IFileConverter, ExcelConverter>();
         services.AddTransient<IFileConverter, FfmpegConverter>();
         services.AddTransient<IFileConverter, LibreOfficeConverter>();
         services.AddTransient<IFileConverter, PandocConverter>();

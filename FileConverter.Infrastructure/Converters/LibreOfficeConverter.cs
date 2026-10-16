@@ -77,14 +77,25 @@ public class LibreOfficeConverter : IFileConverter
 
         _logger.LogInformation("Running LibreOffice headless conversion for {File} -> {Target}", sourcePath, cleanTarget);
 
-        var args = $"--headless --convert-to {cleanTarget} --outdir \"{outputDir}\" \"{sourcePath}\"";
+        var tempProfile = Path.Combine(Path.GetTempPath(), "soffice_p_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempProfile);
+        var profileUri = "file:///" + tempProfile.Replace('\\', '/');
 
-        var result = await CliWrap.Cli.Wrap(sofficeExe)
-            .WithArguments(args)
-            .WithValidation(CommandResultValidation.ZeroExitCode)
-            .ExecuteAsync(ct);
+        try
+        {
+            var args = $"-env:UserInstallation=\"{profileUri}\" --headless --convert-to {cleanTarget} --outdir \"{outputDir}\" \"{sourcePath}\"";
 
-        progress?.Report(100);
+            var result = await CliWrap.Cli.Wrap(sofficeExe)
+                .WithArguments(args)
+                .WithValidation(CommandResultValidation.ZeroExitCode)
+                .ExecuteAsync(ct);
+
+            progress?.Report(100);
+        }
+        finally
+        {
+            try { Directory.Delete(tempProfile, true); } catch { }
+        }
 
         if (!File.Exists(expectedOutput))
         {

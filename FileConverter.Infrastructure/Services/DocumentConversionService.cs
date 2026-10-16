@@ -7,6 +7,8 @@ using FileConverter.Core.Interfaces;
 using Markdig;
 using PdfSharpCore.Drawing;
 using PdfSharpCore.Pdf;
+using Windows.Storage;
+using Windows.Storage.Streams;
 
 namespace FileConverter.Infrastructure.Services;
 
@@ -43,11 +45,15 @@ public class DocumentConversionService : IDocumentConversionService
             {
                 return await _pdfExtractionService.ConvertPdfToTextAsync(sourcePath, outputDir, ct);
             }
-            if (cleanTarget is "png" or "jpg" or "bmp")
+            if (cleanTarget is "png" or "jpg" or "jpeg" or "bmp")
             {
-                var extracted = await _pdfExtractionService.ExtractImagesFromPdfAsync(sourcePath, outputDir, ct);
-                if (extracted.Count > 0) return extracted[0];
-                throw new InvalidOperationException("No images could be extracted from PDF.");
+                return await RenderPdfToImageAsync(sourcePath, cleanTarget, outputDir, baseName, ct);
+            }
+            if (cleanTarget == "rtf")
+            {
+                var txt = await _pdfExtractionService.ConvertPdfToTextAsync(sourcePath, outputDir, ct);
+                var raw = await File.ReadAllTextAsync(txt, ct);
+                return ConvertTextToRtf(raw, outputDir, baseName);
             }
             if (cleanTarget == "md")
             {
@@ -83,12 +89,18 @@ public class DocumentConversionService : IDocumentConversionService
             }
         }
 
-        // 2. If Source is Word (.docx)
+        // 2. If Source is Word (.docx, .doc)
         if (sourceExt is "docx" or "doc")
         {
             if (cleanTarget == "pdf")
             {
                 return await _pdfConversionService.ConvertWordToPdfAsync(sourcePath, outputDir, ct);
+            }
+            if (cleanTarget == "rtf")
+            {
+                var txt = await ConvertWordToFormatsAsync(sourcePath, "txt", outputDir, baseName, ct);
+                var raw = await File.ReadAllTextAsync(txt, ct);
+                return ConvertTextToRtf(raw, outputDir, baseName);
             }
             if (cleanTarget is "txt" or "md" or "html")
             {
@@ -110,6 +122,11 @@ public class DocumentConversionService : IDocumentConversionService
             if (cleanTarget == "docx")
             {
                 return await ConvertMarkdownToWordAsync(sourcePath, outputDir, baseName, ct);
+            }
+            if (cleanTarget == "rtf")
+            {
+                var text = await File.ReadAllTextAsync(sourcePath, ct);
+                return ConvertTextToRtf(text, outputDir, baseName);
             }
             if (cleanTarget == "txt")
             {
@@ -134,6 +151,12 @@ public class DocumentConversionService : IDocumentConversionService
             {
                 return await ConvertHtmlToWordAsync(sourcePath, outputDir, baseName, ct);
             }
+            if (cleanTarget == "rtf")
+            {
+                var txt = await ConvertHtmlToTextAsync(sourcePath, outputDir, baseName, ct);
+                var raw = await File.ReadAllTextAsync(txt, ct);
+                return ConvertTextToRtf(raw, outputDir, baseName);
+            }
             if (cleanTarget == "pdf")
             {
                 return await _pdfConversionService.ConvertTextToPdfAsync(sourcePath, outputDir, ct);
@@ -150,6 +173,11 @@ public class DocumentConversionService : IDocumentConversionService
             if (cleanTarget == "docx")
             {
                 return await ConvertTextToWordAsync(sourcePath, outputDir, baseName, ct);
+            }
+            if (cleanTarget == "rtf")
+            {
+                var text = await File.ReadAllTextAsync(sourcePath, ct);
+                return ConvertTextToRtf(text, outputDir, baseName);
             }
             if (cleanTarget == "html")
             {
@@ -178,8 +206,9 @@ public class DocumentConversionService : IDocumentConversionService
         return Task.Run(() =>
         {
             var paragraphs = new List<(string text, bool isHeading)>();
-            using (var doc = WordprocessingDocument.Open(sourcePath, false))
+            try
             {
+                using var doc = WordprocessingDocument.Open(sourcePath, false);
                 var body = doc.MainDocumentPart?.Document?.Body;
                 if (body != null)
                 {
@@ -195,6 +224,10 @@ public class DocumentConversionService : IDocumentConversionService
                         paragraphs.Add((text, isHeading));
                     }
                 }
+            }
+            catch
+            {
+                paragraphs = ExtractTextFromLegacyDoc(sourcePath);
             }
 
             var dest = Path.Combine(outputDir, $"{baseName}.{targetExt}");
@@ -472,6 +505,142 @@ public class DocumentConversionService : IDocumentConversionService
         }
 
         mainPart.Document.Save();
+        return dest;
+    }
+
+    private static List<(string text, bool isHeading)> ExtractTextFromLegacyDoc(string filePath)
+    {
+        var result = new List<(string text, bool isHeading)>();
+        try
+        {
+            var bytes = File.ReadAllBytes(filePath);
+            var sb = new StringBuilder();
+            for (int i = 0; i < bytes.Length; i++)
+            {
+                byte b = bytes[i];
+                if (b >= 32 && b <= 126)
+                {
+                    sb.Append((char)b);
+                }
+                else if (b == '\r' || b == '\n' || b == '\t')
+                {
+                    if (sb.Length > 0)
+                    {
+                        var str = sb.ToString().Trim();
+                        if (str.Length > 3)
+                        {
+                            result.Add((str, str.Length < 45 && !str.EndsWith('.')));
+                        }
+                        sb.Clear();
+                    }
+                }
+                else
+                {
+                    if (sb.Length > 20)
+                    {
+                        var str = sb.ToString().Trim();
+                        result.Add((str, false));
+                    }
+                    sb.Clear();
+                }
+            }
+        }
+        catch { }
+
+        if (result.Count == 0)
+        {
+            result.Add(("[Legacy document content]", false));
+        }
+        return result;
+    }
+
+    private async Task<string> RenderPdfToImageAsync(string sourcePath, string cleanTarget, string outputDir, string baseName, CancellationToken ct)
+    {
+        var tgt = cleanTarget == "jpeg" ? "jpg" : cleanTarget;
+        var dest = _fileSystemService.GetUniqueDestinationFilePath(outputDir, baseName, "." + tgt);
+        try
+        {
+            var storageFile = await StorageFile.GetFileFromPathAsync(Path.GetFullPath(sourcePath));
+            var pdfDoc = await Windows.Data.Pdf.PdfDocument.LoadFromFileAsync(storageFile);
+            if (pdfDoc.PageCount > 0)
+            {
+                using var page = pdfDoc.GetPage(0);
+                using var stream = new InMemoryRandomAccessStream();
+
+                var options = new Windows.Data.Pdf.PdfPageRenderOptions();
+                if (tgt == "jpg")
+                {
+                    options.BitmapEncoderId = Windows.Graphics.Imaging.BitmapEncoder.JpegEncoderId;
+                }
+                else if (tgt == "bmp")
+                {
+                    options.BitmapEncoderId = Windows.Graphics.Imaging.BitmapEncoder.BmpEncoderId;
+                }
+                else
+                {
+                    options.BitmapEncoderId = Windows.Graphics.Imaging.BitmapEncoder.PngEncoderId;
+                }
+
+                await page.RenderToStreamAsync(stream, options);
+                using var netStream = stream.AsStreamForRead();
+                using var fileStream = File.Create(dest);
+                await netStream.CopyToAsync(fileStream, ct);
+
+                if (File.Exists(dest) && new FileInfo(dest).Length > 0)
+                {
+                    return dest;
+                }
+            }
+        }
+        catch
+        {
+            // Fallback to extraction
+        }
+
+        var extracted = await _pdfExtractionService.ExtractImagesFromPdfAsync(sourcePath, outputDir, ct);
+        if (extracted.Count > 0) return extracted[0];
+        throw new InvalidOperationException("Failed to render PDF page or extract images from PDF.");
+    }
+
+    private string ConvertTextToRtf(string text, string outputDir, string baseName)
+    {
+        var dest = _fileSystemService.GetUniqueDestinationFilePath(outputDir, baseName, ".rtf");
+        var sb = new StringBuilder();
+        sb.AppendLine(@"{\rtf1\ansi\ansicpg1252\deff0\nouicompat\deflang1033{\fonttbl{\f0\fnil\fcharset0 Calibri;}{\f1\fnil\fcharset0 Arial;}}");
+        sb.AppendLine(@"{\colortbl ;\red30\green41\blue59;\red59\green130\blue246;}");
+        sb.AppendLine(@"\viewkind4\uc1\pard\sa200\sl276\slmult1\f0\fs22\lang9 ");
+
+        var lines = text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+        foreach (var line in lines)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                sb.AppendLine(@"\par");
+                continue;
+            }
+
+            var escaped = new StringBuilder();
+            foreach (char c in line)
+            {
+                if (c == '\\') escaped.Append(@"\\");
+                else if (c == '{') escaped.Append(@"\{");
+                else if (c == '}') escaped.Append(@"\}");
+                else if (c > 127) escaped.Append(@"\u").Append((short)c).Append('?');
+                else escaped.Append(c);
+            }
+
+            if (line.StartsWith('#'))
+            {
+                sb.AppendLine($@"\fs28\b {escaped}\b0\fs22\par");
+            }
+            else
+            {
+                sb.AppendLine($@"{escaped}\par");
+            }
+        }
+
+        sb.AppendLine("}");
+        File.WriteAllText(dest, sb.ToString(), Encoding.ASCII);
         return dest;
     }
 }

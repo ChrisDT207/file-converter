@@ -152,6 +152,7 @@ public class ConversionOrchestrator : IConversionOrchestrator
             }
 
             bool succeeded = false;
+            string? lastError = null;
             foreach (var converter in candidateConverters)
             {
                 try
@@ -164,13 +165,14 @@ public class ConversionOrchestrator : IConversionOrchestrator
                 }
                 catch (Exception ex)
                 {
+                    lastError = ex.Message;
                     _logger.LogWarning(ex, "Converter '{Converter}' failed on {File}. Trying next candidate...", converter.Name, fileName);
                 }
             }
 
             if (!succeeded)
             {
-                result.Errors.Add($"All conversion engines failed for '{fileName}' to .{cleanTarget}.");
+                result.Errors.Add($"Conversion failed for '{fileName}' to .{cleanTarget}" + (!string.IsNullOrWhiteSpace(lastError) ? $": {lastError}" : "."));
             }
         }
 

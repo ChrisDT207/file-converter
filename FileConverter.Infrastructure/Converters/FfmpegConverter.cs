@@ -144,6 +144,32 @@ public class FfmpegConverter : IFileConverter
         }
 
         // Video to Video
+        if (tgtExt is "webm")
+        {
+            return $"-y -i \"{input}\" -c:v libvpx-vp9 -b:v 2M -c:a libopus \"{output}\"";
+        }
+        if (tgtExt is "avi")
+        {
+            return $"-y -i \"{input}\" -c:v mpeg4 -q:v 3 -c:a mp3 \"{output}\"";
+        }
+        if (tgtExt is "wmv" or "asf")
+        {
+            return $"-y -i \"{input}\" -c:v wmv2 -b:v 2M -c:a wmav2 \"{output}\"";
+        }
+        if (tgtExt is "ogv")
+        {
+            return $"-y -i \"{input}\" -c:v libtheora -q:v 6 -c:a libvorbis \"{output}\"";
+        }
+        if (tgtExt is "flv")
+        {
+            return $"-y -i \"{input}\" -c:v flv -c:a mp3 \"{output}\"";
+        }
+        if (tgtExt is "mkv")
+        {
+            return $"-y -i \"{input}\" -c:v libx264 -c:a aac \"{output}\"";
+        }
+
+        // Standard MP4 / MOV / M4V
         return $"-y -i \"{input}\" -c:v libx264 -c:a aac -movflags +faststart \"{output}\"";
     }
 }

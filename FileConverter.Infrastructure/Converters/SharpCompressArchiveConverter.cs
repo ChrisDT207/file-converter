@@ -42,6 +42,12 @@ public class SharpCompressArchiveConverter : IFileConverter
 
         if (src == tgt) return false;
 
+        // If target is 7z, xz, or wim, requires 7-Zip CLI for writing
+        if ((tgt is "7z" or "xz" or "wim") && !_binaryLocator.IsBinaryAvailable("7z"))
+        {
+            return false;
+        }
+
         return ArchivableSources.Contains(src) && ArchivableTargets.Contains(tgt);
     }
 
@@ -81,10 +87,46 @@ public class SharpCompressArchiveConverter : IFileConverter
             }
             else
             {
-                _logger.LogInformation("Extracting archive with in-process compressor: {Source}", sourcePath);
+                _logger.LogInformation("Extracting archive with SharpCompress in-process engine: {Source}", sourcePath);
                 await Task.Run(() =>
                 {
-                    System.IO.Compression.ZipFile.ExtractToDirectory(sourcePath, tempExtractDir, overwriteFiles: true);
+                    ct.ThrowIfCancellationRequested();
+                    try
+                    {
+                        using var archive = ArchiveFactory.OpenArchive(sourcePath);
+                        foreach (var entry in archive.Entries.Where(e => !e.IsDirectory))
+                        {
+                            entry.WriteToDirectory(tempExtractDir, new ExtractionOptions
+                            {
+                                ExtractFullPath = true,
+                                Overwrite = true
+                            });
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "ArchiveFactory failed, attempting ReaderFactory or Zip fallback on {Source}", sourcePath);
+                        try
+                        {
+                            using var stream = File.OpenRead(sourcePath);
+                            using var reader = ReaderFactory.OpenReader(stream);
+                            while (reader.MoveToNextEntry())
+                            {
+                                if (!reader.Entry.IsDirectory)
+                                {
+                                    reader.WriteEntryToDirectory(tempExtractDir, new ExtractionOptions
+                                    {
+                                        ExtractFullPath = true,
+                                        Overwrite = true
+                                    });
+                                }
+                            }
+                        }
+                        catch
+                        {
+                            ZipFile.ExtractToDirectory(sourcePath, tempExtractDir, overwriteFiles: true);
+                        }
+                    }
                 }, ct);
             }
 
@@ -107,18 +149,24 @@ public class SharpCompressArchiveConverter : IFileConverter
                 _logger.LogInformation("Packaging into {Target} with in-process compressor", outputPath);
                 await Task.Run(() =>
                 {
-                    if (cleanTarget is "zip")
+                    if (File.Exists(outputPath)) File.Delete(outputPath);
+
+                    if (cleanTarget is "tar")
                     {
-                        if (File.Exists(outputPath)) File.Delete(outputPath);
-                        ZipFile.CreateFromDirectory(tempExtractDir, outputPath, CompressionLevel.Optimal, false);
+                        using var outStream = File.Create(outputPath);
+                        using var writer = WriterFactory.OpenWriter(outStream, ArchiveType.Tar, new WriterOptions(CompressionType.None));
+                        writer.WriteAll(tempExtractDir, "*", SearchOption.AllDirectories);
+                    }
+                    else if (cleanTarget is "tar.gz" or "tgz")
+                    {
+                        using var outStream = File.Create(outputPath);
+                        using var writer = WriterFactory.OpenWriter(outStream, ArchiveType.Tar, new WriterOptions(CompressionType.GZip));
+                        writer.WriteAll(tempExtractDir, "*", SearchOption.AllDirectories);
                     }
                     else
                     {
-                        // Fallback to zip if format not directly writable in-process
-                        var zipOut = Path.Combine(outputDir, $"{baseName}.zip");
-                        if (File.Exists(zipOut)) File.Delete(zipOut);
-                        ZipFile.CreateFromDirectory(tempExtractDir, zipOut, CompressionLevel.Optimal, false);
-                        outputPath = zipOut;
+                        // Default to ZIP
+                        ZipFile.CreateFromDirectory(tempExtractDir, outputPath, CompressionLevel.Optimal, false);
                     }
                 }, ct);
             }

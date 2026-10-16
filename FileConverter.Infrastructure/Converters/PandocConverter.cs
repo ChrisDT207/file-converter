@@ -9,7 +9,12 @@ public class PandocConverter : IFileConverter
     private readonly IBinaryLocator _binaryLocator;
     private readonly ILogger<PandocConverter> _logger;
 
-    private static readonly HashSet<string> PandocSupported = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> PandocInputSupported = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "md", "markdown", "rst", "org", "latex", "tex", "epub", "html", "docx", "odt", "txt"
+    };
+
+    private static readonly HashSet<string> PandocOutputSupported = new(StringComparer.OrdinalIgnoreCase)
     {
         "md", "markdown", "rst", "org", "latex", "tex", "epub", "html", "docx", "odt", "txt", "pdf"
     };
@@ -32,7 +37,7 @@ public class PandocConverter : IFileConverter
 
         if (src == tgt) return false;
 
-        return PandocSupported.Contains(src) && PandocSupported.Contains(tgt);
+        return PandocInputSupported.Contains(src) && PandocOutputSupported.Contains(tgt);
     }
 
     public async Task<string> ConvertAsync(

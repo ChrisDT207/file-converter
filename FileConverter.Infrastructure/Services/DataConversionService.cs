@@ -56,6 +56,14 @@ public class DataConversionService : IDataConversionService
                     ExportToXml(headers, rows, destination, baseName);
                     break;
 
+                case "tsv":
+                    ExportToTsv(headers, rows, destination);
+                    break;
+
+                case "yaml" or "yml":
+                    ExportToYaml(headers, rows, destination);
+                    break;
+
                 case "html":
                     ExportToHtml(headers, rows, destination, baseName);
                     break;
@@ -81,17 +89,67 @@ public class DataConversionService : IDataConversionService
         var headers = new List<string>();
         var rows = new List<List<string>>();
 
-        if (ext == "csv")
+        if (ext is "csv" or "tsv")
         {
             var lines = File.ReadAllLines(filePath, Encoding.UTF8);
             if (lines.Length > 0)
             {
-                headers = ParseCsvLine(lines[0]);
+                char delimiter = ext == "tsv" ? '\t' : ',';
+                headers = ParseDelimitedLine(lines[0], delimiter);
                 for (int i = 1; i < lines.Length; i++)
                 {
                     if (string.IsNullOrWhiteSpace(lines[i])) continue;
-                    rows.Add(ParseCsvLine(lines[i]));
+                    rows.Add(ParseDelimitedLine(lines[i], delimiter));
                 }
+            }
+        }
+        else if (ext is "yaml" or "yml")
+        {
+            var lines = File.ReadAllLines(filePath, Encoding.UTF8);
+            var headerSet = new HashSet<string>();
+            var currentItem = new Dictionary<string, string>();
+            var items = new List<Dictionary<string, string>>();
+
+            foreach (var rawLine in lines)
+            {
+                var line = rawLine.Trim();
+                if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#')) continue;
+
+                if (line.StartsWith('-'))
+                {
+                    if (currentItem.Count > 0)
+                    {
+                        items.Add(new Dictionary<string, string>(currentItem));
+                        currentItem.Clear();
+                    }
+                    line = line.TrimStart('-', ' ').Trim();
+                }
+
+                var colonIdx = line.IndexOf(':');
+                if (colonIdx > 0)
+                {
+                    var key = line.Substring(0, colonIdx).Trim();
+                    var val = line.Substring(colonIdx + 1).Trim().Trim('"', '\'');
+                    headerSet.Add(key);
+                    currentItem[key] = val;
+                }
+            }
+            if (currentItem.Count > 0)
+            {
+                items.Add(currentItem);
+            }
+
+            headers = headerSet.ToList();
+            if (headers.Count == 0) headers = new List<string> { "Property", "Value" };
+
+            foreach (var it in items)
+            {
+                var row = new List<string>();
+                foreach (var h in headers)
+                {
+                    row.Add(it.TryGetValue(h, out var v) ? v : "");
+                }
+                rows.Add(row);
             }
         }
         else if (ext == "json")
@@ -181,55 +239,75 @@ public class DataConversionService : IDataConversionService
         }
         else if (ext is "xlsx" or "xls")
         {
-            using var spreadsheet = SpreadsheetDocument.Open(filePath, false);
-            var workbookPart = spreadsheet.WorkbookPart;
-            if (workbookPart?.Workbook != null)
+            try
             {
-                var sheet = workbookPart.Workbook.Descendants<Sheet>().FirstOrDefault();
-                if (sheet?.Id?.Value != null)
+                using var spreadsheet = SpreadsheetDocument.Open(filePath, false);
+                var workbookPart = spreadsheet.WorkbookPart;
+                if (workbookPart?.Workbook != null)
                 {
-                    var worksheetPart = (WorksheetPart)workbookPart.GetPartById(sheet.Id.Value);
-                    var sheetData = worksheetPart.Worksheet?.Elements<SheetData>().FirstOrDefault();
-                    var sharedStringTable = workbookPart.SharedStringTablePart?.SharedStringTable;
+                    var sheet = workbookPart.Workbook.Descendants<Sheet>().FirstOrDefault();
+                    if (sheet?.Id?.Value != null)
+                    {
+                        var worksheetPart = (WorksheetPart)workbookPart.GetPartById(sheet.Id.Value);
+                        var sheetData = worksheetPart.Worksheet?.Elements<SheetData>().FirstOrDefault();
+                        var sharedStringTable = workbookPart.SharedStringTablePart?.SharedStringTable;
 
-                    if (sheetData != null)
-                    {
-                        bool isFirst = true;
-                    foreach (var row in sheetData.Elements<Row>())
-                    {
-                        var cellValues = new List<string>();
-                        foreach (var cell in row.Elements<Cell>())
+                        if (sheetData != null)
                         {
-                            string val = cell.CellValue?.Text ?? "";
-                            if (cell.DataType != null && cell.DataType == CellValues.SharedString && sharedStringTable != null)
+                            bool isFirst = true;
+                            foreach (var row in sheetData.Elements<Row>())
                             {
-                                if (int.TryParse(val, out int sId))
+                                var cellValues = new List<string>();
+                                foreach (var cell in row.Elements<Cell>())
                                 {
-                                    val = sharedStringTable.ElementAt(sId).InnerText;
+                                    string val = cell.CellValue?.Text ?? "";
+                                    if (cell.DataType != null && cell.DataType == CellValues.SharedString && sharedStringTable != null)
+                                    {
+                                        if (int.TryParse(val, out int sId))
+                                        {
+                                            val = sharedStringTable.ElementAt(sId).InnerText;
+                                        }
+                                    }
+                                    cellValues.Add(val);
+                                }
+
+                                if (isFirst)
+                                {
+                                    headers = cellValues;
+                                    isFirst = false;
+                                }
+                                else
+                                {
+                                    rows.Add(cellValues);
                                 }
                             }
-                            cellValues.Add(val);
-                        }
-
-                        if (isFirst)
-                        {
-                            headers = cellValues;
-                            isFirst = false;
-                        }
-                        else
-                        {
-                            rows.Add(cellValues);
                         }
                     }
                 }
             }
+            catch
+            {
+                // Fallback for legacy binary .xls or unreadable Excel streams
+                headers = new List<string> { "Extracted Data" };
+                try
+                {
+                    var rawLines = File.ReadAllLines(filePath, Encoding.Default)
+                        .Where(l => !string.IsNullOrWhiteSpace(l))
+                        .Select(l => new string(l.Where(c => !char.IsControl(c) || c == '\t').ToArray()))
+                        .Where(l => l.Length > 2)
+                        .Take(500)
+                        .Select(l => new List<string> { l })
+                        .ToList();
+                    rows.AddRange(rawLines);
+                }
+                catch { }
+            }
         }
+
+        return (headers, rows);
     }
 
-    return (headers, rows);
-    }
-
-    private static List<string> ParseCsvLine(string line)
+    private static List<string> ParseDelimitedLine(string line, char delimiter = ',')
     {
         var result = new List<string>();
         var current = new StringBuilder();
@@ -250,7 +328,7 @@ public class DataConversionService : IDataConversionService
                     inQuotes = !inQuotes;
                 }
             }
-            else if (c == ',' && !inQuotes)
+            else if (c == delimiter && !inQuotes)
             {
                 result.Add(current.ToString().Trim());
                 current.Clear();
@@ -353,8 +431,16 @@ public class DataConversionService : IDataConversionService
             var rowElem = new XElement(cleanRowName);
             for (int i = 0; i < headers.Count; i++)
             {
-                var colName = System.Text.RegularExpressions.Regex.Replace(headers[i], @"[^\w]", "_");
-                if (char.IsDigit(colName[0])) colName = "Col_" + colName;
+                var rawHeader = string.IsNullOrWhiteSpace(headers[i]) ? $"Column_{i + 1}" : headers[i];
+                var colName = System.Text.RegularExpressions.Regex.Replace(rawHeader, @"[^\w]", "_");
+                if (string.IsNullOrWhiteSpace(colName) || colName.All(c => c == '_'))
+                {
+                    colName = $"Column_{i + 1}";
+                }
+                else if (char.IsDigit(colName[0]))
+                {
+                    colName = "Col_" + colName;
+                }
                 var val = i < r.Count ? r[i] : "";
                 rowElem.Add(new XElement(colName, val));
             }
@@ -362,6 +448,35 @@ public class DataConversionService : IDataConversionService
         }
 
         doc.Save(destination);
+    }
+
+    private static void ExportToTsv(List<string> headers, List<List<string>> rows, string destination)
+    {
+        using var sw = new StreamWriter(destination, false, Encoding.UTF8);
+        sw.WriteLine(string.Join("\t", headers));
+        foreach (var r in rows)
+        {
+            sw.WriteLine(string.Join("\t", r));
+        }
+    }
+
+    private static void ExportToYaml(List<string> headers, List<List<string>> rows, string destination)
+    {
+        using var sw = new StreamWriter(destination, false, Encoding.UTF8);
+        foreach (var r in rows)
+        {
+            sw.WriteLine("-");
+            for (int i = 0; i < headers.Count; i++)
+            {
+                var h = headers[i];
+                var v = i < r.Count ? r[i] : "";
+                if (v.Contains(':') || v.Contains('#') || v.Contains('\n') || v.Contains('"'))
+                {
+                    v = $"\"{v.Replace("\"", "\\\"")}\"";
+                }
+                sw.WriteLine($"  {h}: {v}");
+            }
+        }
     }
 
     private static void ExportToHtml(List<string> headers, List<List<string>> rows, string destination, string baseName)

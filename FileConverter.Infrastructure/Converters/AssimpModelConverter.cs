@@ -10,9 +10,14 @@ public class AssimpModelConverter : IFileConverter
     private readonly IBinaryLocator _binaryLocator;
     private readonly ILogger<AssimpModelConverter> _logger;
 
-    private static readonly HashSet<string> ModelExts = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> ModelSourceExts = new(StringComparer.OrdinalIgnoreCase)
     {
         "obj", "stl", "gltf", "glb", "ply", "fbx", "dae", "3ds", "blend"
+    };
+
+    private static readonly HashSet<string> ModelTargetExts = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "obj", "stl", "gltf", "glb", "ply", "dae", "3ds"
     };
 
     public AssimpModelConverter(IBinaryLocator binaryLocator, ILogger<AssimpModelConverter> logger)
@@ -33,13 +38,22 @@ public class AssimpModelConverter : IFileConverter
 
         if (src == tgt) return false;
 
+        // Assimp cannot export to .blend
+        if (tgt == "blend") return false;
+
         // If source is .blend, requires Blender CLI
         if (src == "blend" && !_binaryLocator.IsBinaryAvailable("blender"))
         {
             return false;
         }
 
-        return ModelExts.Contains(src) && ModelExts.Contains(tgt);
+        // Export to FBX is only possible via Blender CLI
+        if (tgt == "fbx")
+        {
+            return _binaryLocator.IsBinaryAvailable("blender");
+        }
+
+        return ModelSourceExts.Contains(src) && ModelTargetExts.Contains(tgt);
     }
 
     public async Task<string> ConvertAsync(

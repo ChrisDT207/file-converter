@@ -41,13 +41,15 @@ export const MixedBatchModal: React.FC<MixedBatchModalProps> = ({
     const initialGroups: GroupConfig[] = Array.from(groupMap.entries()).map(([ext, files]) => {
       const available = matrix[ext] || [];
       // Pick sensible default target: pdf for documents, jpg/png for images/raw, mp3 for audio/video, zip for archives
-      let defaultTarget = available[0]?.extension || 'pdf';
-      if (['jpg', 'jpeg', 'cr2', 'nef', 'arw', 'dng', 'png', 'webp'].includes(ext)) {
-        defaultTarget = available.find((t) => t.extension === 'jpg' || t.extension === 'png')?.extension || defaultTarget;
-      } else if (['mp4', 'mkv', 'avi', 'mov'].includes(ext)) {
-        defaultTarget = available.find((t) => t.extension === 'mp3' || t.extension === 'mp4')?.extension || defaultTarget;
-      } else if (['docx', 'doc', 'odt', 'rtf', 'txt', 'html'].includes(ext)) {
-        defaultTarget = available.find((t) => t.extension === 'pdf')?.extension || defaultTarget;
+      let defaultTarget = available[0]?.extension || '';
+      if (available.length > 0) {
+        if (['jpg', 'jpeg', 'cr2', 'nef', 'arw', 'dng', 'png', 'webp'].includes(ext)) {
+          defaultTarget = available.find((t) => t.extension === 'jpg' || t.extension === 'png')?.extension || defaultTarget;
+        } else if (['mp4', 'mkv', 'avi', 'mov'].includes(ext)) {
+          defaultTarget = available.find((t) => t.extension === 'mp3' || t.extension === 'mp4')?.extension || defaultTarget;
+        } else if (['docx', 'doc', 'odt', 'rtf', 'txt', 'html'].includes(ext)) {
+          defaultTarget = available.find((t) => t.extension === 'pdf')?.extension || defaultTarget;
+        }
       }
 
       return {
@@ -71,6 +73,7 @@ export const MixedBatchModal: React.FC<MixedBatchModalProps> = ({
   const handleExecute = () => {
     const items: ConversionItem[] = [];
     for (const group of groups) {
+      if (!group.selectedTarget) continue;
       for (const file of group.files) {
         items.push({
           sourceFilePath: file.fullPath,
@@ -78,8 +81,13 @@ export const MixedBatchModal: React.FC<MixedBatchModalProps> = ({
         });
       }
     }
+    if (items.length === 0) return;
     onConfirmBatch(items);
   };
+
+  const totalConvertibleFiles = groups
+    .filter((g) => !!g.selectedTarget)
+    .reduce((sum, g) => sum + g.files.length, 0);
 
   const getFormatBadgeStyle = (ext: string) => {
     if (['pdf', 'docx', 'doc', 'odt', 'txt', 'rtf'].includes(ext)) return 'badge-doc';
@@ -146,18 +154,24 @@ export const MixedBatchModal: React.FC<MixedBatchModalProps> = ({
                       <label htmlFor={`target-select-${group.extension}`} className="target-select-label">
                         Convert into:
                       </label>
-                      <select
-                        id={`target-select-${group.extension}`}
-                        className="group-target-select"
-                        value={group.selectedTarget}
-                        onChange={(e) => handleTargetChange(group.extension, e.target.value)}
-                      >
-                        {availableTargets.map((target) => (
-                          <option key={target.extension} value={target.extension}>
-                            {target.label}
-                          </option>
-                        ))}
-                      </select>
+                      {availableTargets.length > 0 ? (
+                        <select
+                          id={`target-select-${group.extension}`}
+                          className="group-target-select"
+                          value={group.selectedTarget}
+                          onChange={(e) => handleTargetChange(group.extension, e.target.value)}
+                        >
+                          {availableTargets.map((target) => (
+                            <option key={target.extension} value={target.extension}>
+                              {target.label}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="text-warning text-sm" style={{ padding: '6px 12px', background: 'rgba(234, 179, 8, 0.12)', borderRadius: '6px' }}>
+                          No compatible converter available
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -170,9 +184,14 @@ export const MixedBatchModal: React.FC<MixedBatchModalProps> = ({
           <button type="button" className="btn-secondary" onClick={onClose}>
             Cancel
           </button>
-          <button type="button" className="btn-primary" onClick={handleExecute}>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={handleExecute}
+            disabled={totalConvertibleFiles === 0}
+          >
             <CheckCircle2 size={18} />
-            <span>Convert All {selectedFiles.length} Files</span>
+            <span>Convert {totalConvertibleFiles} File(s)</span>
           </button>
         </div>
       </div>

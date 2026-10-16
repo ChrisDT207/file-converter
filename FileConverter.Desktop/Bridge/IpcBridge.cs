@@ -85,7 +85,7 @@ public class IpcBridge
 
             case "getconversionmatrix":
             {
-                return ConversionRegistry.GetAllMatrix();
+                return ConversionRegistry.GetAllMatrix(_binaryLocator);
             }
 
             case "gettargetformats":
@@ -102,7 +102,7 @@ public class IpcBridge
                         ext = prop.GetString() ?? string.Empty;
                     }
                 }
-                return ConversionRegistry.GetAvailableTargetsForExtension(ext);
+                return ConversionRegistry.GetAvailableTargetsForExtension(ext, _binaryLocator);
             }
 
             case "getmimeinfo":

@@ -75,8 +75,12 @@ public class ImageConversionService : IImageConversionService
                     break;
 
                 case "webp":
-                    // Fallback to high-quality PNG with webp extension or native GDI+ save
-                    sourceImage.Save(destination, ImageFormat.Png);
+                    using (var magickImg = new ImageMagick.MagickImage(sourcePath))
+                    {
+                        magickImg.Format = ImageMagick.MagickFormat.WebP;
+                        magickImg.Quality = 85;
+                        magickImg.Write(destination);
+                    }
                     break;
 
                 default:

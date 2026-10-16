@@ -40,6 +40,35 @@ public class BinaryLocator : IBinaryLocator
 
     public bool IsBinaryAvailable(string binaryName)
     {
+        if (binaryName.Equals("powerpnt", StringComparison.OrdinalIgnoreCase) ||
+            binaryName.Equals("powerpoint", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                if (Type.GetTypeFromProgID("PowerPoint.Application") != null) return true;
+            }
+            catch { }
+        }
+
+        if (binaryName.Equals("winword", StringComparison.OrdinalIgnoreCase) ||
+            binaryName.Equals("word", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                if (Type.GetTypeFromProgID("Word.Application") != null) return true;
+            }
+            catch { }
+        }
+
+        if (binaryName.Equals("excel", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                if (Type.GetTypeFromProgID("Excel.Application") != null) return true;
+            }
+            catch { }
+        }
+
         return FindBinary(binaryName) != null;
     }
 
@@ -55,7 +84,7 @@ public class BinaryLocator : IBinaryLocator
 
     public Dictionary<string, bool> GetToolsStatus()
     {
-        var tools = new[] { "soffice", "pandoc", "magick", "ffmpeg", "7z", "blender" };
+        var tools = new[] { "soffice", "pandoc", "magick", "ffmpeg", "7z", "blender", "powerpnt", "winword", "excel" };
         var status = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         foreach (var tool in tools)
         {
@@ -126,6 +155,39 @@ public class BinaryLocator : IBinaryLocator
 
             case "blender":
                 return ProbeWildcard(@"C:\Program Files\Blender Foundation", "Blender*", "blender.exe");
+
+            case "powerpnt" or "powerpoint":
+                return ProbePaths(
+                    @"C:\Program Files\Microsoft Office\root\Office16\POWERPNT.EXE",
+                    @"C:\Program Files (x86)\Microsoft Office\root\Office16\POWERPNT.EXE",
+                    @"C:\Program Files\Microsoft Office\Office16\POWERPNT.EXE",
+                    @"C:\Program Files (x86)\Microsoft Office\Office16\POWERPNT.EXE",
+                    @"C:\Program Files\Microsoft Office\Office15\POWERPNT.EXE",
+                    @"C:\Program Files (x86)\Microsoft Office\Office15\POWERPNT.EXE"
+                ) ?? ProbeWildcard(@"C:\Program Files\Microsoft Office", "*", "POWERPNT.EXE")
+                  ?? ProbeWildcard(@"C:\Program Files (x86)\Microsoft Office", "*", "POWERPNT.EXE");
+
+            case "winword" or "word":
+                return ProbePaths(
+                    @"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE",
+                    @"C:\Program Files (x86)\Microsoft Office\root\Office16\WINWORD.EXE",
+                    @"C:\Program Files\Microsoft Office\Office16\WINWORD.EXE",
+                    @"C:\Program Files (x86)\Microsoft Office\Office16\WINWORD.EXE",
+                    @"C:\Program Files\Microsoft Office\Office15\WINWORD.EXE",
+                    @"C:\Program Files (x86)\Microsoft Office\Office15\WINWORD.EXE"
+                ) ?? ProbeWildcard(@"C:\Program Files\Microsoft Office", "*", "WINWORD.EXE")
+                  ?? ProbeWildcard(@"C:\Program Files (x86)\Microsoft Office", "*", "WINWORD.EXE");
+
+            case "excel":
+                return ProbePaths(
+                    @"C:\Program Files\Microsoft Office\root\Office16\EXCEL.EXE",
+                    @"C:\Program Files (x86)\Microsoft Office\root\Office16\EXCEL.EXE",
+                    @"C:\Program Files\Microsoft Office\Office16\EXCEL.EXE",
+                    @"C:\Program Files (x86)\Microsoft Office\Office16\EXCEL.EXE",
+                    @"C:\Program Files\Microsoft Office\Office15\EXCEL.EXE",
+                    @"C:\Program Files (x86)\Microsoft Office\Office15\EXCEL.EXE"
+                ) ?? ProbeWildcard(@"C:\Program Files\Microsoft Office", "*", "EXCEL.EXE")
+                  ?? ProbeWildcard(@"C:\Program Files (x86)\Microsoft Office", "*", "EXCEL.EXE");
 
             default:
                 return null;

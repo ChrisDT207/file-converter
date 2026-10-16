@@ -198,16 +198,28 @@ export const App: React.FC = () => {
       return available.some((opt) => opt.extension.toLowerCase() === cleanTarget);
     });
 
-    const filesToConvert = convertibleFiles.length > 0 ? convertibleFiles : selectedFiles;
+    if (convertibleFiles.length === 0) {
+      setConversionResult({
+        jobId: '',
+        success: false,
+        message: `None of the selected files can be converted to .${cleanTarget.toUpperCase()}.`,
+        generatedFilePaths: [],
+        errors: [`No converters or compatible formats available for selected files to .${cleanTarget.toUpperCase()}.`],
+        durationMs: 0,
+        processedFilesCount: 0,
+      });
+      setIsConversionModalOpen(true);
+      return;
+    }
 
     const request: ConversionRequest = {
       actionType: 0, // ConvertToTargetFormat
       targetExtension: cleanTarget,
-      sourceFilePaths: filesToConvert.map((f) => f.fullPath),
+      sourceFilePaths: convertibleFiles.map((f) => f.fullPath),
       outputDirectory: outputDirectory,
     };
 
-    executeConversion(request, `Converting ${filesToConvert.length} file(s) to ${cleanTarget.toUpperCase()}...`);
+    executeConversion(request, `Converting ${convertibleFiles.length} file(s) to ${cleanTarget.toUpperCase()}...`);
   };
 
   // Handle mixed batch conversion

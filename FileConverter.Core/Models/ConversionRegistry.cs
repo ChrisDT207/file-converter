@@ -1,3 +1,5 @@
+using FileConverter.Core.Interfaces;
+
 namespace FileConverter.Core.Models;
 
 public class FormatDefinition
@@ -168,51 +170,152 @@ public static class ConversionRegistry
         return Formats.TryGetValue(clean, out var def) ? def.MimeType : "application/octet-stream";
     }
 
-    public static List<TargetOptionDto> GetAvailableTargetsForExtension(string ext)
+    public static List<TargetOptionDto> GetAvailableTargetsForExtension(string ext, IBinaryLocator? locator = null)
     {
         var clean = ext.TrimStart('.').ToLowerInvariant();
         var category = GetCategory(clean);
         var results = new List<TargetOptionDto>();
 
+        bool hasFfmpeg = locator?.IsBinaryAvailable("ffmpeg") ?? true;
+        bool hasPowerPoint = locator?.IsBinaryAvailable("powerpnt") ?? true;
+        bool hasWord = locator?.IsBinaryAvailable("winword") ?? true;
+        bool hasExcel = locator?.IsBinaryAvailable("excel") ?? true;
+        bool hasLibreOffice = locator?.IsBinaryAvailable("soffice") ?? true;
+        bool hasPandoc = locator?.IsBinaryAvailable("pandoc") ?? true;
+        bool has7z = locator?.IsBinaryAvailable("7z") ?? true;
+        bool hasBlender = locator?.IsBinaryAvailable("blender") ?? true;
+
+        bool hasDocSuite = hasWord || hasLibreOffice;
+        bool hasSheetSuite = hasExcel || hasLibreOffice;
+        bool hasSlideSuite = hasPowerPoint || hasLibreOffice;
+
         switch (category)
         {
             case "document":
-                AddTargets(results, clean, new[] { "pdf", "docx", "odt", "rtf", "txt", "html", "md", "epub", "latex" });
+            {
+                if (clean is "pages" or "wpd" or "mobi" or "azw3" or "fb2")
+                {
+                    if (!hasLibreOffice && !hasPandoc) return results;
+                }
+                else if (clean is "odt")
+                {
+                    if (!hasDocSuite && !hasPandoc) return results;
+                }
+                else if (clean is "rtf")
+                {
+                    if (!hasDocSuite && !hasPandoc) return results;
+                }
+                else if (clean is "epub" or "latex" or "tex" or "rst" or "org")
+                {
+                    if (!hasPandoc) return results;
+                }
+
+                var targets = new List<string> { "pdf", "docx", "txt", "html", "md", "rtf" };
+                if (hasDocSuite || hasPandoc)
+                {
+                    targets.Add("odt");
+                }
+                if (hasPandoc)
+                {
+                    targets.Add("epub");
+                    targets.Add("latex");
+                }
+                if (clean == "pdf")
+                {
+                    targets.Add("png");
+                    targets.Add("jpg");
+                }
+                AddTargets(results, clean, targets);
                 break;
+            }
 
             case "spreadsheet":
-                AddTargets(results, clean, new[] { "csv", "xlsx", "ods", "json", "xml", "tsv", "yaml", "html", "pdf", "txt" });
+            {
+                if (clean is "ods")
+                {
+                    if (!hasSheetSuite) return results;
+                }
+                else if (clean is "numbers")
+                {
+                    if (!hasLibreOffice) return results;
+                }
+
+                var targets = new List<string> { "csv", "xlsx", "json", "xml", "tsv", "yaml", "html", "pdf", "txt" };
+                if (hasSheetSuite)
+                {
+                    targets.Add("ods");
+                }
+                AddTargets(results, clean, targets);
                 break;
+            }
 
             case "presentation":
-                AddTargets(results, clean, new[] { "pdf", "pptx", "odp", "png", "jpg" });
+            {
+                if (clean == "pptx")
+                {
+                    var targets = new List<string> { "pdf", "txt", "md", "html", "png", "jpg" };
+                    if (hasSlideSuite)
+                    {
+                        targets.Add("odp");
+                    }
+                    AddTargets(results, clean, targets);
+                }
+                else
+                {
+                    if (!hasSlideSuite) return results;
+                    AddTargets(results, clean, new[] { "pdf", "pptx", "odp", "png", "jpg", "txt", "html", "md" });
+                }
                 break;
+            }
 
             case "image":
+            {
                 AddTargets(results, clean, new[] { "png", "jpg", "webp", "avif", "gif", "tiff", "bmp", "ico", "svg", "pdf", "tga", "dds", "jp2" });
                 break;
+            }
 
             case "raw":
-                // Camera RAW converts into standard raster formats
+            {
                 AddTargets(results, clean, new[] { "jpg", "png", "webp", "tiff", "bmp", "avif", "pdf" });
                 break;
+            }
 
             case "audio":
+            {
+                if (!hasFfmpeg) return results;
                 AddTargets(results, clean, new[] { "mp3", "wav", "flac", "aac", "ogg", "m4a", "opus", "wma", "alac", "aiff" });
                 break;
+            }
 
             case "video":
-                // Video cross-conversions, plus audio and animation extraction
+            {
+                if (!hasFfmpeg) return results;
                 AddTargets(results, clean, new[] { "mp4", "mkv", "webm", "avi", "mov", "wmv", "mp3", "wav", "aac", "flac", "gif", "webp" });
                 break;
+            }
 
             case "3d":
-                AddTargets(results, clean, new[] { "obj", "stl", "gltf", "glb", "ply", "dae", "3ds" });
+            {
+                var targets = new List<string> { "obj", "stl", "gltf", "glb", "ply", "dae", "3ds" };
+                if (hasBlender)
+                {
+                    targets.Add("fbx");
+                }
+                AddTargets(results, clean, targets);
                 break;
+            }
 
             case "archive":
-                AddTargets(results, clean, new[] { "zip", "7z", "tar", "tar.gz", "xz" });
+            {
+                var targets = new List<string> { "zip", "tar", "tar.gz" };
+                if (has7z)
+                {
+                    targets.Add("7z");
+                    targets.Add("xz");
+                }
+                AddTargets(results, clean, targets);
                 break;
+            }
 
             default:
                 AddTargets(results, clean, new[] { "pdf", "txt" });
@@ -222,7 +325,7 @@ public static class ConversionRegistry
         return results;
     }
 
-    private static void AddTargets(List<TargetOptionDto> list, string currentExt, string[] candidateExts)
+    private static void AddTargets(List<TargetOptionDto> list, string currentExt, IEnumerable<string> candidateExts)
     {
         foreach (var candidate in candidateExts)
         {
@@ -244,12 +347,12 @@ public static class ConversionRegistry
         }
     }
 
-    public static Dictionary<string, List<TargetOptionDto>> GetAllMatrix()
+    public static Dictionary<string, List<TargetOptionDto>> GetAllMatrix(IBinaryLocator? locator = null)
     {
         var dict = new Dictionary<string, List<TargetOptionDto>>(StringComparer.OrdinalIgnoreCase);
         foreach (var key in Formats.Keys)
         {
-            dict[key] = GetAvailableTargetsForExtension(key);
+            dict[key] = GetAvailableTargetsForExtension(key, locator);
         }
         return dict;
     }
