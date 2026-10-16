@@ -23,9 +23,13 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b %ERRORLEVEL%
 )
 
+echo [3/3] Updating root FileConverter.Desktop.exe...
+copy /y ".\ReleaseBuild\FileConverter.Desktop.exe" ".\FileConverter.Desktop.exe" >nul
+
 echo.
 echo ============================================================
 echo   SUCCESS! Standalone Desktop Executable created:
-echo   .\ReleaseBuild\FileConverter.Desktop.exe
+echo   - .\ReleaseBuild\FileConverter.Desktop.exe
+echo   - .\FileConverter.Desktop.exe
 echo ============================================================
 pause
